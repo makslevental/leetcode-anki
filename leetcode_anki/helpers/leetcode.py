@@ -4,8 +4,10 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from functools import cached_property
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple, Type, TypeVar
 
 # https://github.com/prius/python-leetcode
@@ -19,6 +21,8 @@ import leetcode.models.graphql_query_problemset_question_list_variables  # type:
 import leetcode.models.graphql_query_problemset_question_list_variables_filter_input  # type: ignore
 import leetcode.models.graphql_question_detail  # type: ignore
 import urllib3  # type: ignore
+from PIL import Image, ImageOps
+from selenium.webdriver.common.by import By
 from tqdm import tqdm  # type: ignore
 
 CACHE_DIR = "cache"
@@ -34,8 +38,12 @@ def _get_leetcode_api_client() -> leetcode.api.default_api.DefaultApi:
 
     configuration = leetcode.configuration.Configuration()
 
-    session_id = os.environ["LEETCODE_SESSION_ID"]
-    csrf_token = os.environ["LEETCODE_CSRF_TOKEN"]
+    # cf_clearance=a6jVcRTM3isYpZGBufOhVqzHiypuSCfWKV4fLkS_8VU-1747069116-1.2.1.1-EZBFSsyQixTc5.Cmcjh3tMoBhkGhurCnOrCK0SNHQJ148kkXVJyo3CdgyloNrBsAouMOwwITgIBf.lAPTIuCzxz7f4Ev_LZ39vNbriNBdEb7NK5OsY_V_3SN75ARxXmq6TydObmyq4lOEgimKsiqzT0euOS7IKleU4J3iB1TtVpV7ZmD1mWynI2OIOsmIWQOAVm8ar6zRDt5dYbdmx9PdEkZq.19Tlwee5bEWdXWsV_Wl5hEUYojm93AeJYiwcd2l0Ejwola3YRman74c_nYiL_5mL0FT6jNkDFYCf1vsfbYDiT2VlG2PeJwMgvrRnM0_tZP7yhGsdv7K86vP6G.s1NiMBkGRjNrdnbI1FLoDFBa9wQVAhVvJRVpzbTPDBAF;
+    # csrftoken=6KLAMaRn51nhd2YGDrpJSnAWAeEx7Gl9zWjVeCr9rgm1BWVQjWrFzXGzuWTtK4Jd;
+    # LEETCODE_SESSION=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJfYXV0aF91c2VyX2lkIjoiMTA0MDM5NiIsIl9hdXRoX3VzZXJfYmFja2VuZCI6ImFsbGF1dGguYWNjb3VudC5hdXRoX2JhY2tlbmRzLkF1dGhlbnRpY2F0aW9uQmFja2VuZCIsIl9hdXRoX3VzZXJfaGFzaCI6ImU0NDE4OWZjMWViZGY4ZTVkMDgxOTA5NWU2NTFmNzUzNTllNGViOGVkZjM1ODFhNDgyN2YzYzg0OGE3ZDdjN2QiLCJzZXNzaW9uX3V1aWQiOiJmMjhhZTJhMSIsImlkIjoxMDQwMzk2LCJlbWFpbCI6Im1ha3NpbS5sZXZlbnRhbEBnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImljZTEwOSIsInVzZXJfc2x1ZyI6ImljZTEwOSIsImF2YXRhciI6Imh0dHBzOi8vYXNzZXRzLmxlZXRjb2RlLmNvbS91c2Vycy9tYWtzbGV2ZW50YWwvYXZhdGFyXzE1MjkyNjc3MzEucG5nIiwicmVmcmVzaGVkX2F0IjoxNzQ3Njc2MTA3LCJpcCI6IjI2MDE6MTgyOmNlMDA6NTM3MDphMjBlOjE2Nzk6ZDAzZToxZGUwIiwiaWRlbnRpdHkiOiJkZmNhZjEwYmVjZThhNTlkMzkwNGI1NThjMDVkM2E0NiIsImRldmljZV93aXRoX2lwIjpbImFlN2Y4NmE5ZTgxMTUxNzY3NTZmNzNmY2Q3ZmZlYTMzIiwiMjYwMToxODI6Y2UwMDo1MzcwOmEyMGU6MTY3OTpkMDNlOjFkZTAiXSwiX3Nlc3Npb25fZXhwaXJ5IjoxMjA5NjAwfQ.deD3PwhKt3MbTCnVt7A3IUH9amJHgZZ8VFjdqviqiMM;
+    # ip_check=(false, "2601:182:ce00:5370:a20e:1679:d03e:1de0"); INGRESSCOOKIE=ab8ba45b488aa472b310b24c9005efac|8e0876c7c1464cc0ac96bc2edceabd27
+    session_id = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJfYXV0aF91c2VyX2lkIjoiMTA0MDM5NiIsIl9hdXRoX3VzZXJfYmFja2VuZCI6ImFsbGF1dGguYWNjb3VudC5hdXRoX2JhY2tlbmRzLkF1dGhlbnRpY2F0aW9uQmFja2VuZCIsIl9hdXRoX3VzZXJfaGFzaCI6ImU0NDE4OWZjMWViZGY4ZTVkMDgxOTA5NWU2NTFmNzUzNTllNGViOGVkZjM1ODFhNDgyN2YzYzg0OGE3ZDdjN2QiLCJzZXNzaW9uX3V1aWQiOiJmMjhhZTJhMSIsImlkIjoxMDQwMzk2LCJlbWFpbCI6Im1ha3NpbS5sZXZlbnRhbEBnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImljZTEwOSIsInVzZXJfc2x1ZyI6ImljZTEwOSIsImF2YXRhciI6Imh0dHBzOi8vYXNzZXRzLmxlZXRjb2RlLmNvbS91c2Vycy9tYWtzbGV2ZW50YWwvYXZhdGFyXzE1MjkyNjc3MzEucG5nIiwicmVmcmVzaGVkX2F0IjoxNzQ3Njc2MTA3LCJpcCI6IjI2MDE6MTgyOmNlMDA6NTM3MDphMjBlOjE2Nzk6ZDAzZToxZGUwIiwiaWRlbnRpdHkiOiJkZmNhZjEwYmVjZThhNTlkMzkwNGI1NThjMDVkM2E0NiIsImRldmljZV93aXRoX2lwIjpbImFlN2Y4NmE5ZTgxMTUxNzY3NTZmNzNmY2Q3ZmZlYTMzIiwiMjYwMToxODI6Y2UwMDo1MzcwOmEyMGU6MTY3OTpkMDNlOjFkZTAiXSwiX3Nlc3Npb25fZXhwaXJ5IjoxMjA5NjAwfQ.deD3PwhKt3MbTCnVt7A3IUH9amJHgZZ8VFjdqviqiMM"  # os.environ["LEETCODE_SESSION_ID"]
+    csrf_token = "6KLAMaRn51nhd2YGDrpJSnAWAeEx7Gl9zWjVeCr9rgm1BWVQjWrFzXGzuWTtK4Jd"  # os.environ["LEETCODE_CSRF_TOKEN"]
 
     configuration.api_key["x-csrftoken"] = csrf_token
     configuration.api_key["csrftoken"] = csrf_token
@@ -84,6 +92,11 @@ class _RetryDecorator:
             return func(*args, **kwargs)
 
         return wrapper
+
+
+import mistune
+
+from selenium import webdriver
 
 
 def retry(
@@ -147,45 +160,129 @@ class LeetcodeData:
     def _get_problems_count(self) -> int:
         api_instance = self._api_instance
 
-        graphql_request = leetcode.models.graphql_query.GraphqlQuery(
-            query="""
-            query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
-              problemsetQuestionList: questionList(
-                categorySlug: $categorySlug
-                limit: $limit
-                skip: $skip
-                filters: $filters
-              ) {
-                totalNum
+        # graphql_request = leetcode.models.graphql_query.GraphqlQuery(
+        #     query="""
+        #     query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+        #       problemsetQuestionList: questionList(
+        #         categorySlug: $categorySlug
+        #         limit: $limit
+        #         skip: $skip
+        #         filters: $filters
+        #       ) {
+        #         totalNum
+        #       }
+        #     }
+        #     """,
+        #     variables=leetcode.models.graphql_query_problemset_question_list_variables.GraphqlQueryProblemsetQuestionListVariables(
+        #         category_slug="",
+        #         limit=1,
+        #         skip=0,
+        #         filters=leetcode.models.graphql_query_problemset_question_list_variables_filter_input.GraphqlQueryProblemsetQuestionListVariablesFilterInput(
+        #             tags=[],
+        #             list_id=self._list_id,
+        #             # difficulty="MEDIUM",
+        #             # status="NOT_STARTED",
+        #             # list_id="7p5x763",  # Top Amazon Questions
+        #             # premium_only=False,
+        #         ),
+        #     ),
+        #     operation_name="problemsetQuestionList",
+        # )
+        #
+        # data = api_instance.graphql_post(body=graphql_request).data
+
+        graphql_request = {
+            "query": """
+        query favoriteQuestionList($favoriteSlug: String!, $filter: FavoriteQuestionFilterInput, $filtersV2: QuestionFilterInput, $searchKeyword: String, $sortBy: QuestionSortByInput, $limit: Int, $skip: Int, $version: String = "v2") {
+          favoriteQuestionList(
+            favoriteSlug: $favoriteSlug
+            filter: $filter
+            filtersV2: $filtersV2
+            searchKeyword: $searchKeyword
+            sortBy: $sortBy
+            limit: $limit
+            skip: $skip
+            version: $version
+          ) {
+            questions {
+              difficulty
+              id
+              paidOnly
+              questionFrontendId
+              status
+              title
+              titleSlug
+              translatedTitle
+              isInMyFavorites
+              frequency
+              acRate
+              topicTags {
+                name
+                nameTranslated
+                slug
               }
             }
+            totalLength
+            hasMore
+          }
+        }
             """,
-            variables=leetcode.models.graphql_query_problemset_question_list_variables.GraphqlQueryProblemsetQuestionListVariables(
-                category_slug="",
-                limit=1,
-                skip=0,
-                filters=leetcode.models.graphql_query_problemset_question_list_variables_filter_input.GraphqlQueryProblemsetQuestionListVariablesFilterInput(
-                    tags=[],
-                    list_id=self._list_id,
-                    # difficulty="MEDIUM",
-                    # status="NOT_STARTED",
-                    # list_id="7p5x763",  # Top Amazon Questions
-                    # premium_only=False,
-                ),
-            ),
-            operation_name="problemsetQuestionList",
-        )
+            "variables": {
+                "skip": 0,
+                "limit": 1000,
+                "favoriteSlug": "facebook-thirty-days",
+                "filtersV2": {
+                    "filterCombineType": "ALL",
+                    "statusFilter": {"questionStatuses": [], "operator": "IS"},
+                    "difficultyFilter": {"difficulties": [], "operator": "IS"},
+                    "languageFilter": {"languageSlugs": [], "operator": "IS"},
+                    "topicFilter": {"topicSlugs": [], "operator": "IS"},
+                    "acceptanceFilter": {},
+                    "frequencyFilter": {},
+                    "lastSubmittedFilter": {},
+                    "publishedFilter": {},
+                    "companyFilter": {"companySlugs": [], "operator": "IS"},
+                    "positionFilter": {"positionSlugs": [], "operator": "IS"},
+                    "premiumFilter": {"premiumStatus": [], "operator": "IS"},
+                },
+                "searchKeyword": "",
+                "sortBy": {"sortField": "FREQUENCY", "sortOrder": "DESCENDING"},
+            },
+            "operationName": "favoriteQuestionList",
+        }
 
         time.sleep(2)  # Leetcode has a rate limiter
-        data = api_instance.graphql_post(body=graphql_request).data
+        data = api_instance.graphql_post(
+            body=graphql_request, _preload_content=False
+        ).data
+        data = json.loads(data.decode())
+        # question_slugs = [q.title_slug for q in data.problemset_question_list.questions]
+        # add_question_to_list = {
+        #     "query": """
+        #     mutation batchAddQuestionsToFavorite($favoriteSlug: String!, $questionSlugs: [String]!) {
+        #       batchAddQuestionsToFavorite(
+        #         favoriteSlug: $favoriteSlug
+        #         questionSlugs: $questionSlugs
+        #       ) {
+        #         ok
+        #         error
+        #       }
+        #     }
+        #     """,
+        #     "variables": {"favoriteSlug": "2jvrtw0j", "questionSlugs": question_slugs},
+        #     "operationName": "batchAddQuestionsToFavorite",
+        # }
 
-        return data.problemset_question_list.total_num or 0
+        # data = api_instance.graphql_post(body=add_question_to_list).data
+
+        return data["data"]["favoriteQuestionList"]["totalLength"] or 0
 
     @retry(times=3, exceptions=(urllib3.exceptions.ProtocolError,), delay=5)
     def _get_problems_data_page(
         self, offset: int, page_size: int, page: int
     ) -> List[leetcode.models.graphql_question_detail.GraphqlQuestionDetail]:
         api_instance = self._api_instance
+        list_id = "2jvrtw0j"
         graphql_request = leetcode.models.graphql_query.GraphqlQuery(
             query="""
             query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
@@ -221,7 +318,7 @@ class LeetcodeData:
                 limit=page_size,
                 skip=offset + page * page_size,
                 filters=leetcode.models.graphql_query_problemset_question_list_variables_filter_input.GraphqlQueryProblemsetQuestionListVariablesFilterInput(
-                    list_id=self._list_id
+                    list_id=list_id
                 ),
             ),
             operation_name="problemsetQuestionList",
@@ -326,13 +423,13 @@ class LeetcodeData:
         data = self._get_problem_data(problem_slug)
         diff = data.difficulty
 
-        if diff == "Easy":
+        if diff in {"Easy", "EASY"}:
             return "<font color='green'>Easy</font>"
 
-        if diff == "Medium":
+        if diff in {"Medium", "MEDIUM"}:
             return "<font color='orange'>Medium</font>"
 
-        if diff == "Hard":
+        if diff in {"Hard", "HARD"}:
             return "<font color='red'>Hard</font>"
 
         raise ValueError(f"Incorrect difficulty: {diff}")
@@ -404,3 +501,96 @@ class LeetcodeData:
         """
         data = self._get_problem_data(problem_slug)
         return data.category_title
+
+    async def hints(self, problem_slug: str) -> float:
+        """
+        Returns problem category title
+        """
+        data = self._get_problem_data(problem_slug)
+        return data.hints
+
+    browser = webdriver.Chrome()
+
+    async def solution(self, problem_slug: str) -> str:
+        query = """
+        query ugcArticleOfficialSolutionArticle($questionSlug: String!) {
+          ugcArticleOfficialSolutionArticle(questionSlug: $questionSlug) {
+            content
+          }
+        }
+        """
+
+        graphql_request = {
+            "query": query,
+            "variables": {"questionSlug": problem_slug},
+            "operationName": "ugcArticleOfficialSolutionArticle",
+        }
+        api_instance = self._api_instance
+        data = api_instance.graphql_post(body=graphql_request, _preload_content=False)
+        if data:
+            try:
+                data = data.json()
+                rawmd = data["data"]["ugcArticleOfficialSolutionArticle"]["content"]
+                rawmd = re.sub(
+                    "<lcvideo>.*</lcvideo>", "", rawmd, flags=re.MULTILINE | re.DOTALL
+                )
+                rawmd = rawmd.replace("## Video Solution\n", "")
+                rawmd = rawmd.replace("../Figures", f"https://leetcode.com/problems/{problem_slug}/Figures")
+                iframes = list(
+                    re.finditer(
+                        r'<iframe src="https://leetcode.com/playground/(.*?)" .* height="(\d+)" name="(\w+)"></iframe>',
+                        rawmd,
+                    )
+                )
+                iframe_images = []
+                if iframes:
+                    for iframe in iframes[::-1]:
+                        pth = Path(__file__).parent.parent / problem_slug
+                        pth.mkdir(exist_ok=True)
+                        pth /= f"{iframe.group(3)}.png"
+                        if not pth.exists():
+                            self.browser.get(
+                                f"https://leetcode.com/playground/{iframe.group(1)}"
+                            )
+                            time.sleep(2)
+                            try:
+                                python_button = self.browser.find_element(
+                                    by=By.XPATH,
+                                    value="""//*[@id="app"]/div/div[1]/div[1]/div/button[text()='Python3']""",
+                                )
+                                python_button.click()
+                            except:
+                                pass
+                            code = self.browser.find_element(
+                                by=By.CLASS_NAME, value="CodeMirror-code"
+                            )
+                            lines = self.browser.find_elements(
+                                by=By.XPATH, value="//span[@role='presentation']"
+                            )
+                            rect = code.rect
+                            rect["width"] = max([l.size["width"] for l in lines])
+                            self.browser.save_screenshot(str(pth))
+                            im = Image.open(pth)
+                            im = im.crop(
+                                (
+                                    rect["x"],
+                                    rect["y"],
+                                    rect["width"] + rect["x"],
+                                    rect["height"] + rect["y"],
+                                )
+                            )
+                            img_with_border = ImageOps.expand(im, border=1)
+                            img_with_border.save(pth, "PNG")
+
+                        iframe_images.append(pth)
+                        old = rawmd[iframe.span()[0] : iframe.span()[1]]
+                        rawmd = rawmd.replace(old, f'<img src="{iframe.group(3)}.png">')
+                html = mistune.html(rawmd)
+                html = re.sub(r"\$\$(.*?)\$\$", r"\\(\1\\)", html)
+                html = re.sub(r"\$(.*?)\$", r"\\(\1\\)", html)
+                return html, iframe_images
+            except Exception as e:
+                print(problem_slug, e)
+                return None
+        else:
+            return None

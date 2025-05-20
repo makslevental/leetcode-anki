@@ -77,33 +77,53 @@ async def generate_anki_note(
     """
     Generate a single Anki flashcard
     """
+
+    fields = [
+                 leetcode_task_handle,
+                 str(await leetcode_data.problem_id(leetcode_task_handle)),
+                 str(await leetcode_data.title(leetcode_task_handle)),
+                 # str(await leetcode_data.category(leetcode_task_handle)),
+                 await leetcode_data.description(leetcode_task_handle),
+                 await leetcode_data.difficulty(leetcode_task_handle),
+                 # "yes" if await leetcode_data.paid(leetcode_task_handle) else "no",
+                 # str(await leetcode_data.likes(leetcode_task_handle)),
+                 # str(await leetcode_data.dislikes(leetcode_task_handle)),
+                 # str(await leetcode_data.submissions_total(leetcode_task_handle)),
+                 # str(await leetcode_data.submissions_accepted(leetcode_task_handle)),
+                 # str(
+                 #     int(
+                 #         await leetcode_data.submissions_accepted(leetcode_task_handle)
+                 #         / await leetcode_data.submissions_total(leetcode_task_handle)
+                 #         * 100
+                 #     )
+                 # ),
+                 # str(await leetcode_data.freq_bar(leetcode_task_handle)),
+             ]
+
+    hints = [str(hint) for hint in await leetcode_data.hints(leetcode_task_handle)]
+    if len(hints) > 5:
+        raise Exception("not enough hints")
+    for i in range(5):
+        if i < len(hints):
+            fields.append(hints[i])
+        else:
+            fields.append("")
+
+    solution = await leetcode_data.solution(leetcode_task_handle)
+    iframes = []
+    if solution is not None:
+        html, iframes = solution
+        fields.append(html)
+    else:
+        fields.append("")
+
     return LeetcodeNote(
         model=leetcode_model,
-        fields=[
-            leetcode_task_handle,
-            str(await leetcode_data.problem_id(leetcode_task_handle)),
-            str(await leetcode_data.title(leetcode_task_handle)),
-            str(await leetcode_data.category(leetcode_task_handle)),
-            await leetcode_data.description(leetcode_task_handle),
-            await leetcode_data.difficulty(leetcode_task_handle),
-            "yes" if await leetcode_data.paid(leetcode_task_handle) else "no",
-            str(await leetcode_data.likes(leetcode_task_handle)),
-            str(await leetcode_data.dislikes(leetcode_task_handle)),
-            str(await leetcode_data.submissions_total(leetcode_task_handle)),
-            str(await leetcode_data.submissions_accepted(leetcode_task_handle)),
-            str(
-                int(
-                    await leetcode_data.submissions_accepted(leetcode_task_handle)
-                    / await leetcode_data.submissions_total(leetcode_task_handle)
-                    * 100
-                )
-            ),
-            str(await leetcode_data.freq_bar(leetcode_task_handle)),
-        ],
+        fields=fields,
         tags=await leetcode_data.tags(leetcode_task_handle),
         # FIXME: sort field doesn't work doesn't work
         sort_field=str(await leetcode_data.freq_bar(leetcode_task_handle)).zfill(3),
-    )
+    ), iframes
 
 
 async def generate(
@@ -119,17 +139,24 @@ async def generate(
             {"name": "Slug"},
             {"name": "Id"},
             {"name": "Title"},
-            {"name": "Topic"},
+            # {"name": "Topic"},
             {"name": "Content"},
             {"name": "Difficulty"},
-            {"name": "Paid"},
-            {"name": "Likes"},
-            {"name": "Dislikes"},
-            {"name": "SubmissionsTotal"},
-            {"name": "SubmissionsAccepted"},
-            {"name": "SumissionAcceptRate"},
-            {"name": "Frequency"},
+            # {"name": "Paid"},
+            # {"name": "Likes"},
+            # {"name": "Dislikes"},
+            # {"name": "SubmissionsTotal"},
+            # {"name": "SubmissionsAccepted"},
+            # {"name": "SumissionAcceptRate"},
+            # {"name": "Frequency"},
             # TODO: add hints
+            {"name": "Hint1"},
+            {"name": "Hint2"},
+            {"name": "Hint3"},
+            {"name": "Hint4"},
+            {"name": "Hint5"},
+            {"name": "Solution"},
+
         ],
         templates=[
             {
@@ -137,17 +164,6 @@ async def generate(
                 "qfmt": """
                 <h2>{{Id}}. {{Title}}</h2>
                 <b>Difficulty:</b> {{Difficulty}}<br/>
-                &#128077; {{Likes}} &#128078; {{Dislikes}}<br/>
-                <b>Submissions (total/accepted):</b>
-                {{SubmissionsTotal}}/{{SubmissionsAccepted}}
-                ({{SumissionAcceptRate}}%)
-                <br/>
-                <b>Topic:</b> {{Topic}}<br/>
-                <b>Frequency:</b>
-                <progress value="{{Frequency}}" max="100">
-                {{Frequency}}%
-                </progress>
-                <br/>
                 <b>URL:</b>
                 <a href='https://leetcode.com/problems/{{Slug}}/'>
                     https://leetcode.com/problems/{{Slug}}/
@@ -155,20 +171,21 @@ async def generate(
                 <br/>
                 <h3>Description</h3>
                 {{Content}}
+                </br>
+                <h2>{{hint:Hint1}}</h2>
+                </br>
+                <h2>{{hint:Hint2}}</h2>
+                </br>
+                <h2>{{hint:Hint3}}</h2>
+                </br>
+                <h2>{{hint:Hint4}}</h2>
+                </br>
+                <h2>{{hint:Hint5}}</h2>
+                </br>
                 """,
                 "afmt": """
-                {{FrontSide}}
                 <hr id="answer">
-                <b>Discuss URL:</b>
-                <a href='https://leetcode.com/problems/{{Slug}}/discuss/'>
-                    https://leetcode.com/problems/{{Slug}}/discuss/
-                </a>
-                <br/>
-                <b>Solution URL:</b>
-                <a href='https://leetcode.com/problems/{{Slug}}/solution/'>
-                    https://leetcode.com/problems/{{Slug}}/solution/
-                </a>
-                <br/>
+                {{Solution}}
                 """,
             }
         ],
@@ -188,11 +205,13 @@ async def generate(
         note_generators.append(
             generate_anki_note(leetcode_data, leetcode_model, leetcode_task_handle)
         )
-
+    pack = genanki.Package(leetcode_deck)
     for leetcode_note in tqdm(note_generators, unit="flashcard"):
-        leetcode_deck.add_note(await leetcode_note)
+        leetcode_note, iframe_paths = await leetcode_note
+        leetcode_deck.add_note(leetcode_note)
+        pack.media_files += [str(f) for f in iframe_paths]
 
-    genanki.Package(leetcode_deck).write_to_file(output_file)
+    pack.write_to_file(output_file)
 
 
 async def main() -> None:
