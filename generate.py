@@ -101,9 +101,10 @@ async def generate_anki_note(
              ]
 
     hints = [str(hint) for hint in await leetcode_data.hints(leetcode_task_handle)]
-    if len(hints) > 5:
-        raise Exception("not enough hints")
-    for i in range(5):
+    num_hints = 6
+    if len(hints) > 6:
+        raise Exception(f"not enough hints: {len(hints)}")
+    for i in range(num_hints):
         if i < len(hints):
             fields.append(hints[i])
         else:
@@ -155,12 +156,13 @@ async def generate(
             {"name": "Hint3"},
             {"name": "Hint4"},
             {"name": "Hint5"},
+            {"name": "Hint6"},
             {"name": "Solution"},
 
         ],
         templates=[
             {
-                "name": "Leetcode",
+                "name": "Leetcode Patterns",
                 "qfmt": """
                 <h2>{{Id}}. {{Title}}</h2>
                 <b>Difficulty:</b> {{Difficulty}}<br/>
