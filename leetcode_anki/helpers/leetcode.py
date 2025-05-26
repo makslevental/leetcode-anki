@@ -27,6 +27,10 @@ from tqdm import tqdm  # type: ignore
 
 CACHE_DIR = "cache"
 
+FAVORITES_SLUG = os.getenv("FAVORITES_SLUG", "facebook-all")
+ADD_TO_LIST = bool(int(os.getenv("ADD_TO_LIST", "0") or 0))
+SAVED_LIST_FAVORITES_SLUG = os.getenv("SAVED_FAVORITES_SLUG", "nlsp6tm6")
+
 
 def _get_leetcode_api_client() -> leetcode.api.default_api.DefaultApi:
     """
@@ -37,8 +41,8 @@ def _get_leetcode_api_client() -> leetcode.api.default_api.DefaultApi:
     """
 
     configuration = leetcode.configuration.Configuration()
-    session_id = os.environ["LEETCODE_SESSION_ID"]
-    csrf_token = os.environ["LEETCODE_CSRF_TOKEN"]
+    session_id = os.environ["LEETCODE_SESSION"]
+    csrf_token = os.environ["csrftoken"]
 
     configuration.api_key["x-csrftoken"] = csrf_token
     configuration.api_key["csrftoken"] = csrf_token
@@ -151,41 +155,9 @@ class LeetcodeData:
         problems = self._get_problems_data()
         return {problem.title_slug: problem for problem in problems}
 
-    @retry(times=3, exceptions=(urllib3.exceptions.ProtocolError,), delay=5)
-    def _get_problems_count(self) -> int:
-        api_instance = self._api_instance
-
-        # graphql_request = leetcode.models.graphql_query.GraphqlQuery(
-        #     query="""
-        #     query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
-        #       problemsetQuestionList: questionList(
-        #         categorySlug: $categorySlug
-        #         limit: $limit
-        #         skip: $skip
-        #         filters: $filters
-        #       ) {
-        #         totalNum
-        #       }
-        #     }
-        #     """,
-        #     variables=leetcode.models.graphql_query_problemset_question_list_variables.GraphqlQueryProblemsetQuestionListVariables(
-        #         category_slug="",
-        #         limit=1,
-        #         skip=0,
-        #         filters=leetcode.models.graphql_query_problemset_question_list_variables_filter_input.GraphqlQueryProblemsetQuestionListVariablesFilterInput(
-        #             tags=[],
-        #             list_id=self._list_id,
-        #             # difficulty="MEDIUM",
-        #             # status="NOT_STARTED",
-        #             # list_id="7p5x763",  # Top Amazon Questions
-        #             # premium_only=False,
-        #         ),
-        #     ),
-        #     operation_name="problemsetQuestionList",
-        # )
-        #
-        # data = api_instance.graphql_post(body=graphql_request).data
-
+    def get_favorite_questions_list(
+        self, api_instance, favorites_slug, skip=0, limit=250
+    ):
         graphql_request = {
             "query": """
         query favoriteQuestionList($favoriteSlug: String!, $filter: FavoriteQuestionFilterInput, $filtersV2: QuestionFilterInput, $searchKeyword: String, $sortBy: QuestionSortByInput, $limit: Int, $skip: Int, $version: String = "v2") {
@@ -223,13 +195,16 @@ class LeetcodeData:
         }
             """,
             "variables": {
-                "skip": 0,
-                "limit": 1000,
-                "favoriteSlug": "facebook-thirty-days",
+                "skip": skip,
+                "limit": limit,
+                "favoriteSlug": favorites_slug,
                 "filtersV2": {
                     "filterCombineType": "ALL",
                     "statusFilter": {"questionStatuses": [], "operator": "IS"},
-                    "difficultyFilter": {"difficulties": [], "operator": "IS"},
+                    "difficultyFilter": {
+                        "difficulties": ["MEDIUM", "HARD"],
+                        "operator": "IS",
+                    },
                     "languageFilter": {"languageSlugs": [], "operator": "IS"},
                     "topicFilter": {"topicSlugs": [], "operator": "IS"},
                     "acceptanceFilter": {},
@@ -250,34 +225,56 @@ class LeetcodeData:
         data = api_instance.graphql_post(
             body=graphql_request, _preload_content=False
         ).data
-        data = json.loads(data.decode())
-        # question_slugs = [q.title_slug for q in data.problemset_question_list.questions]
-        # add_question_to_list = {
-        #     "query": """
-        #     mutation batchAddQuestionsToFavorite($favoriteSlug: String!, $questionSlugs: [String]!) {
-        #       batchAddQuestionsToFavorite(
-        #         favoriteSlug: $favoriteSlug
-        #         questionSlugs: $questionSlugs
-        #       ) {
-        #         ok
-        #         error
-        #       }
-        #     }
-        #     """,
-        #     "variables": {"favoriteSlug": "2jvrtw0j", "questionSlugs": question_slugs},
-        #     "operationName": "batchAddQuestionsToFavorite",
-        # }
+        data = json.loads(data.decode())["data"]["favoriteQuestionList"]
+        questions = {}
+        for q in data["questions"]:
+            questions[q["titleSlug"]] = q
+        data["questions"] = questions
+        return data
 
-        # data = api_instance.graphql_post(body=add_question_to_list).data
+    def add_to_question_list(
+        self, favorite_questions_list_data, api_instance, saved_list_favorites_slug
+    ):
+        question_slugs = list(favorite_questions_list_data["questions"].keys())
+        add_question_to_list = {
+            "query": """
+            mutation batchAddQuestionsToFavorite($favoriteSlug: String!, $questionSlugs: [String]!) {
+              batchAddQuestionsToFavorite(
+                favoriteSlug: $favoriteSlug
+                questionSlugs: $questionSlugs
+              ) {
+                ok
+                error
+              }
+            }
+            """,
+            "variables": {
+                "favoriteSlug": saved_list_favorites_slug,
+                "questionSlugs": question_slugs,
+            },
+            "operationName": "batchAddQuestionsToFavorite",
+        }
+        api_instance.graphql_post(body=add_question_to_list)
 
-        return data["data"]["favoriteQuestionList"]["totalLength"] or 0
+    @retry(times=3, exceptions=(urllib3.exceptions.ProtocolError,), delay=5)
+    def _get_problems_count(self) -> int:
+        api_instance = self._api_instance
+        self.favorite_questions_list_data = self.get_favorite_questions_list(
+            api_instance, FAVORITES_SLUG
+        )
+        if ADD_TO_LIST:
+            self.add_to_question_list(
+                self.favorite_questions_list_data,
+                api_instance,
+                SAVED_LIST_FAVORITES_SLUG,
+            )
+        return self.favorite_questions_list_data["totalLength"] or 0
 
     @retry(times=3, exceptions=(urllib3.exceptions.ProtocolError,), delay=5)
     def _get_problems_data_page(
         self, offset: int, page_size: int, page: int
     ) -> List[leetcode.models.graphql_question_detail.GraphqlQuestionDetail]:
         api_instance = self._api_instance
-        list_id = "2jvrtw0j"
         graphql_request = leetcode.models.graphql_query.GraphqlQuery(
             query="""
             query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
@@ -313,7 +310,7 @@ class LeetcodeData:
                 limit=page_size,
                 skip=offset + page * page_size,
                 filters=leetcode.models.graphql_query_problemset_question_list_variables_filter_input.GraphqlQueryProblemsetQuestionListVariablesFilterInput(
-                    list_id=list_id
+                    list_id=SAVED_LIST_FAVORITES_SLUG
                 ),
             ),
             operation_name="problemsetQuestionList",
@@ -323,6 +320,11 @@ class LeetcodeData:
         data = api_instance.graphql_post(
             body=graphql_request
         ).data.problemset_question_list.questions
+
+        for d in data:
+            d.frequency = self.favorite_questions_list_data["questions"][d.title_slug][
+                "frequency"
+            ]
 
         return data
 
@@ -490,6 +492,13 @@ class LeetcodeData:
         data = self._get_problem_data(problem_slug)
         return data.title
 
+    async def frequency(self, problem_slug: str) -> float:
+        """
+        Returns problem title
+        """
+        data = self._get_problem_data(problem_slug)
+        return str(int(data.frequency))
+
     async def category(self, problem_slug: str) -> float:
         """
         Returns problem category title
@@ -529,8 +538,12 @@ class LeetcodeData:
                 rawmd = re.sub(
                     "<lcvideo>.*</lcvideo>", "", rawmd, flags=re.MULTILINE | re.DOTALL
                 )
+                rawmd = re.sub("!?!.*!?!", "", rawmd)
                 rawmd = rawmd.replace("## Video Solution\n", "")
-                rawmd = rawmd.replace("../Figures", f"https://leetcode.com/problems/{problem_slug}/Figures")
+                rawmd = rawmd.replace(
+                    "../Figures",
+                    f"https://leetcode.com/problems/{problem_slug}/Figures",
+                )
                 iframes = list(
                     re.finditer(
                         r'<iframe src="https://leetcode.com/playground/(.*?)" .* height="(\d+)" name="(\w+)"></iframe>',

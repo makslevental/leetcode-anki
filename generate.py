@@ -18,7 +18,7 @@ import leetcode_anki.helpers.leetcode
 
 LEETCODE_ANKI_MODEL_ID = 4567610856
 LEETCODE_ANKI_DECK_ID = 8589798175
-OUTPUT_FILE = "leetcode.apkg"
+OUTPUT_FILE = "fb.apkg"
 ALLOWED_EXTENSIONS = {".py", ".go"}
 
 
@@ -79,26 +79,27 @@ async def generate_anki_note(
     """
 
     fields = [
-                 leetcode_task_handle,
-                 str(await leetcode_data.problem_id(leetcode_task_handle)),
-                 str(await leetcode_data.title(leetcode_task_handle)),
-                 # str(await leetcode_data.category(leetcode_task_handle)),
-                 await leetcode_data.description(leetcode_task_handle),
-                 await leetcode_data.difficulty(leetcode_task_handle),
-                 # "yes" if await leetcode_data.paid(leetcode_task_handle) else "no",
-                 # str(await leetcode_data.likes(leetcode_task_handle)),
-                 # str(await leetcode_data.dislikes(leetcode_task_handle)),
-                 # str(await leetcode_data.submissions_total(leetcode_task_handle)),
-                 # str(await leetcode_data.submissions_accepted(leetcode_task_handle)),
-                 # str(
-                 #     int(
-                 #         await leetcode_data.submissions_accepted(leetcode_task_handle)
-                 #         / await leetcode_data.submissions_total(leetcode_task_handle)
-                 #         * 100
-                 #     )
-                 # ),
-                 # str(await leetcode_data.freq_bar(leetcode_task_handle)),
-             ]
+        leetcode_task_handle,
+        str(await leetcode_data.problem_id(leetcode_task_handle)),
+        str(await leetcode_data.title(leetcode_task_handle)),
+        # str(await leetcode_data.category(leetcode_task_handle)),
+        await leetcode_data.description(leetcode_task_handle),
+        await leetcode_data.difficulty(leetcode_task_handle),
+        await leetcode_data.frequency(leetcode_task_handle),
+        # "yes" if await leetcode_data.paid(leetcode_task_handle) else "no",
+        # str(await leetcode_data.likes(leetcode_task_handle)),
+        # str(await leetcode_data.dislikes(leetcode_task_handle)),
+        # str(await leetcode_data.submissions_total(leetcode_task_handle)),
+        # str(await leetcode_data.submissions_accepted(leetcode_task_handle)),
+        # str(
+        #     int(
+        #         await leetcode_data.submissions_accepted(leetcode_task_handle)
+        #         / await leetcode_data.submissions_total(leetcode_task_handle)
+        #         * 100
+        #     )
+        # ),
+        # str(await leetcode_data.freq_bar(leetcode_task_handle)),
+    ]
 
     hints = [str(hint) for hint in await leetcode_data.hints(leetcode_task_handle)]
     num_hints = 6
@@ -118,13 +119,16 @@ async def generate_anki_note(
     else:
         fields.append("")
 
-    return LeetcodeNote(
-        model=leetcode_model,
-        fields=fields,
-        tags=await leetcode_data.tags(leetcode_task_handle),
-        # FIXME: sort field doesn't work doesn't work
-        sort_field=str(await leetcode_data.freq_bar(leetcode_task_handle)).zfill(3),
-    ), iframes
+    return (
+        LeetcodeNote(
+            model=leetcode_model,
+            fields=fields,
+            tags=await leetcode_data.tags(leetcode_task_handle),
+            # FIXME: sort field doesn't work doesn't work
+            # sort_field=str(await leetcode_data.freq_bar(leetcode_task_handle)).zfill(3),
+        ),
+        iframes,
+    )
 
 
 async def generate(
@@ -149,7 +153,7 @@ async def generate(
             # {"name": "SubmissionsTotal"},
             # {"name": "SubmissionsAccepted"},
             # {"name": "SumissionAcceptRate"},
-            # {"name": "Frequency"},
+            {"name": "Frequency"},
             # TODO: add hints
             {"name": "Hint1"},
             {"name": "Hint2"},
@@ -158,7 +162,6 @@ async def generate(
             {"name": "Hint5"},
             {"name": "Hint6"},
             {"name": "Solution"},
-
         ],
         templates=[
             {
@@ -166,6 +169,7 @@ async def generate(
                 "qfmt": """
                 <h2>{{Id}}. {{Title}}</h2>
                 <b>Difficulty:</b> {{Difficulty}}<br/>
+                <b>Frequency:</b> {{Frequency}}<br/>
                 <b>URL:</b>
                 <a href='https://leetcode.com/problems/{{Slug}}/'>
                     https://leetcode.com/problems/{{Slug}}/
